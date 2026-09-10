@@ -1515,7 +1515,7 @@ let FIXED_COSTS = 32000;       // Постійні витрати
 let FIXED_COSTS_PERIOD = 100000; // Постійні витрати за 2 міс
 let OVERHEAD_COEF = FIXED_COSTS / FIXED_COSTS_PERIOD; // Коефіцієнт накладних витрат
 let DESIRED_MARGIN = 0.50;     // Бажана маржа (% прибутку)
-const PRICE_FLUCTUATION_MARKUP = 0; // надбавка на коливання ціни запчастин (прибрана)
+let PRICE_FLUCTUATION_MARKUP = 0.05; // надбавка на коливання ціни запчастин — 5%, застосовується до всього КРІМ збірки і фрезерування
 
 
 /* ============ СТАН ============ */
@@ -3235,6 +3235,7 @@ const PE_PRIMITIVE_GETTERS = {
   FIXED_COSTS: () => FIXED_COSTS,
   FIXED_COSTS_PERIOD: () => FIXED_COSTS_PERIOD,
   DESIRED_MARGIN_PCT: () => DESIRED_MARGIN * 100,
+  PRICE_FLUCTUATION_MARKUP_PCT: () => PRICE_FLUCTUATION_MARKUP * 100,
 };
 const PE_PRIMITIVE_SETTERS = {
   MATERIAL_PRICE_5MM: v => { MATERIAL_PRICE_5MM = v==null? 0 : v; },
@@ -3244,6 +3245,7 @@ const PE_PRIMITIVE_SETTERS = {
   FIXED_COSTS: v => { FIXED_COSTS = v==null? 0 : v; OVERHEAD_COEF = FIXED_COSTS / FIXED_COSTS_PERIOD; },
   FIXED_COSTS_PERIOD: v => { FIXED_COSTS_PERIOD = (v==null || v===0) ? 1 : v; OVERHEAD_COEF = FIXED_COSTS / FIXED_COSTS_PERIOD; },
   DESIRED_MARGIN_PCT: v => { DESIRED_MARGIN = (v==null? 0 : v) / 100; },
+  PRICE_FLUCTUATION_MARKUP_PCT: v => { PRICE_FLUCTUATION_MARKUP = (v==null? 0 : v) / 100; },
 };
 
 function peField(labelHtml, ref, path, value){
@@ -3413,6 +3415,7 @@ function buildPriceEditorHTML(){
       ${pePrimField('Постійні витрати, грн', 'FIXED_COSTS', PE_PRIMITIVE_GETTERS.FIXED_COSTS())}
       ${pePrimField('...за період, грн', 'FIXED_COSTS_PERIOD', PE_PRIMITIVE_GETTERS.FIXED_COSTS_PERIOD())}
       ${pePrimField('Бажана маржа, %', 'DESIRED_MARGIN_PCT', PE_PRIMITIVE_GETTERS.DESIRED_MARGIN_PCT())}
+      ${pePrimField('Надбавка на запчастини, %', 'PRICE_FLUCTUATION_MARKUP_PCT', PE_PRIMITIVE_GETTERS.PRICE_FLUCTUATION_MARKUP_PCT())}
     </div></div>
   </details>`;
 
@@ -3422,7 +3425,7 @@ function buildPriceEditorHTML(){
 function getPriceSnapshot(){
   return {
     MATERIAL_PRICE_5MM, MILLING_PRICE, SEALANT_TUBE_PRICE, CONNECTOR_PRICE,
-    FIXED_COSTS, FIXED_COSTS_PERIOD, DESIRED_MARGIN,
+    FIXED_COSTS, FIXED_COSTS_PERIOD, DESIRED_MARGIN, PRICE_FLUCTUATION_MARKUP,
     OUTSOURCE_MILLING_TIERS: JSON.parse(JSON.stringify(OUTSOURCE_MILLING_TIERS)),
     ASSEMBLY_PRICE: JSON.parse(JSON.stringify(ASSEMBLY_PRICE)),
     DIFFUSER_PRICE: JSON.parse(JSON.stringify(DIFFUSER_PRICE)),
@@ -3449,6 +3452,7 @@ function applyPriceSnapshotData(snap){
   if(snap.FIXED_COSTS_PERIOD!=null) FIXED_COSTS_PERIOD = snap.FIXED_COSTS_PERIOD;
   OVERHEAD_COEF = FIXED_COSTS / FIXED_COSTS_PERIOD;
   if(snap.DESIRED_MARGIN!=null) DESIRED_MARGIN = snap.DESIRED_MARGIN;
+  if(snap.PRICE_FLUCTUATION_MARKUP!=null) PRICE_FLUCTUATION_MARKUP = snap.PRICE_FLUCTUATION_MARKUP;
 
   if(snap.OUTSOURCE_MILLING_TIERS){
     OUTSOURCE_MILLING_TIERS.length = 0;
