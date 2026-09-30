@@ -885,7 +885,7 @@
 
         <div class="row" id="millingOutsourceRow" style="margin-top:10px;">
           <div class="field">
-            <label>Ціна фрезерування (аутсорс), грн <span class="val">(авто за площею, можна змінити)</span></label>
+            <label>Ціна фрезерування (аутсорс), грн <span class="val">(авто за найдовшою стороною, можна змінити)</span></label>
             <input type="text" inputmode="decimal" id="millingOutsourcePriceInput" value="300">
             <div class="auto-note" id="millingOutsourceNote"></div>
           </div>
@@ -1263,14 +1263,18 @@ const LED_POWER_PER_M = 8; // Вт на 1 м/п
 let MATERIAL_PRICE_5MM = 1900; // грн за м² (редаговано користувачем)
 let MILLING_PRICE = 25; // грн за м/п (редаговано користувачем, тариф "Свій ЧПУ")
 
-// Тарифи фрезерування "Аутсорс" — за площею акрилу (Ш×В), м²
+// Тарифи фрезерування "Аутсорс" — за найдовшою стороною виробу (без припуску), мм
 let OUTSOURCE_MILLING_TIERS = [
-  {max:0.5, price:300},
-  {max:1.1, price:500},
-  {max:Infinity, price:700},
+  {max:500, price:300},
+  {max:1000, price:500},
+  {max:Infinity, price:700}, // до 1500 мм (і більше — з попередженням перевірити ціну)
 ];
-function outsourceMillingTierPrice(areaM2){
-  const tier = OUTSOURCE_MILLING_TIERS.find(t => areaM2 <= t.max);
+const OUTSOURCE_MILLING_MAX_SIDE_MM = 1500; // понад цей розмір тарифна сітка не визначена
+function millingLongestSideMm(widthCm, heightCm){
+  return Math.max(widthCm||0, heightCm||0) * 10;
+}
+function outsourceMillingTierPrice(longestSideMm){
+  const tier = OUTSOURCE_MILLING_TIERS.find(t => longestSideMm <= t.max);
   return tier ? tier.price : OUTSOURCE_MILLING_TIERS[OUTSOURCE_MILLING_TIERS.length-1].price;
 }
 const ASSEMBLY_PRICE = {'Внутрішній':35, 'Зовнішній':50}; // грн за елемент
@@ -1529,7 +1533,7 @@ const DEFAULTS = {
   ],
   millingMode: 'Аутсорс', // 'Аутсорс' | 'Свій ЧПУ' — за замовчуванням Аутсорс для будь-якого способу розрахунку
   millingOutsourcePrice: 300,
-  millingOutsourceManual: false, // чи змінено ціну аутсорсу вручну (інакше підбирається автоматично за площею)
+  millingOutsourceManual: false, // чи змінено ціну аутсорсу вручну (інакше підбирається автоматично за найдовшою стороною)
   assemblyCount: 0,
   totalLength: 0,
   diffusers: [
@@ -1832,7 +1836,7 @@ function getPartsAggregate(){
     const millP = (p.length||0) + wM*3 + hM*3;
     materialArea += areaP;
     millingLength += millP;
-    outsourcePriceAuto += hasSizeP ? outsourceMillingTierPrice(areaP) : 0;
+    outsourcePriceAuto += hasSizeP ? outsourceMillingTierPrice(millingLongestSideMm(w, h)) : 0;
   });
   return { materialArea, millingLength, outsourcePriceAuto };
 }
@@ -2065,21 +2069,29 @@ function render(){
 
   buildCableSizeOptions();
 
-  // Спосіб фрезерування: підбираємо ціну Аутсорсу за площею ДО calculate(),
+  // Спосіб фрезерування: підбираємо ціну Аутсорсу за найдовшою стороною ДО calculate(),
   // щоб підсумкові суми в цьому ж рендері вже враховували актуальний тариф,
   // а не значення з попереднього рендеру.
   const isMultiPartR = state.partsMode === 'multi';
-  let hasSizeForMilling, materialAreaForMilling, millingTierPriceForRender;
+  let hasSizeForMilling, millingTierPriceForRender, millingSidesMm;
   if(isMultiPartR){
     const agg = getPartsAggregate();
     hasSizeForMilling = state.parts.some(p => (p.widthCm||0) > 0 || (p.heightCm||0) > 0);
-    materialAreaForMilling = agg.materialArea;
+    millingSidesMm = state.parts.map(p => millingLongestSideMm(p.widthCm, p.heightCm));
     millingTierPriceForRender = agg.outsourcePriceAuto;
   } else {
     hasSizeForMilling = (state.widthCm||0) > 0 || (state.heightCm||0) > 0;
-    materialAreaForMilling = hasSizeForMilling ? ((state.widthCm||0) + 3) * ((state.heightCm||0) + 3) / 10000 : 0;
-    millingTierPriceForRender = hasSizeForMilling ? outsourceMillingTierPrice(materialAreaForMilling) : 0;
+    millingSidesMm = [millingLongestSideMm(state.widthCm, state.heightCm)];
+    millingTierPriceForRender = hasSizeForMilling ? outsourceMillingTierPrice(millingSidesMm[0]) : 0;
   }
+  const millingTiersText = OUTSOURCE_MILLING_TIERS.map((t,i)=>{
+    const prev = i>0 ? OUTSOURCE_MILLING_TIERS[i-1].max : 0;
+    return (t.max===Infinity) ? `до ${OUTSOURCE_MILLING_MAX_SIDE_MM} мм — ${t.price} грн` : `до ${t.max} мм — ${t.price} грн`;
+  }).join(', ');
+  const millingOversize = millingSidesMm.some(mm => mm > OUTSOURCE_MILLING_MAX_SIDE_MM);
+  const millingOversizeWarn = millingOversize
+    ? `<br><span style="color:var(--amber)">⚠ Найдовша сторона понад ${OUTSOURCE_MILLING_MAX_SIDE_MM} мм — тариф для такого розміру не визначено, підставлено ${OUTSOURCE_MILLING_TIERS[OUTSOURCE_MILLING_TIERS.length-1].price} грн. Уточніть ціну у фрезерувальника і вкажіть її вручну.</span>`
+    : '';
   if(state.millingMode === 'Аутсорс' && !state.millingOutsourceManual){
     state.millingOutsourcePrice = millingTierPriceForRender;
   }
@@ -2093,12 +2105,12 @@ function render(){
     : `Формула: (Ширина+3)×(Висота+3)/10000`;
   document.getElementById('millingLength').value = fmt(r.millingLength) + ' м/п';
   document.getElementById('millingPriceNote').innerHTML = isMultiPartR
-    ? `Сума фрезерування двох частин: (Довжина + Ш×3 + В×3) для кожної частини. <span style="color:var(--muted)">Довідково — при Аутсорсі на ціну фрезерування не впливає, рахується лише за площею.</span>`
+    ? `Сума фрезерування двох частин: (Довжина + Ш×3 + В×3) для кожної частини. <span style="color:var(--muted)">Довідково — при Аутсорсі на ціну фрезерування не впливає, рахується лише за найдовшою стороною.</span>`
     : (state.millingMode === 'Аутсорс'
-      ? `Формула: Довжина неону + Ширина×3 + Висота×3. <span style="color:var(--muted)">Довідково — при Аутсорсі на ціну фрезерування не впливає, рахується лише за площею.</span>`
+      ? `Формула: Довжина неону + Ширина×3 + Висота×3. <span style="color:var(--muted)">Довідково — при Аутсорсі на ціну фрезерування не впливає, рахується лише за найдовшою стороною.</span>`
       : `Формула: Довжина неону + Ширина×3 + Висота×3`);
 
-  // Спосіб фрезерування: Аутсорс (тариф за площею) / Свій ЧПУ (за м/п)
+  // Спосіб фрезерування: Аутсорс (тариф за найдовшою стороною) / Свій ЧПУ (за м/п)
   [...document.getElementById('millingModeToggle').children].forEach(b=>{
     b.classList.toggle('active', b.dataset.val === state.millingMode);
   });
@@ -2107,12 +2119,12 @@ function render(){
 
   setFieldValue('millingOutsourcePriceInput', state.millingOutsourcePrice);
   document.getElementById('millingOutsourceNote').innerHTML = state.millingOutsourceManual
-    ? `Тариф за площею (${fmt(r.materialArea)} м²): <b>${millingTierPriceForRender} грн</b> — але встановлено вручну.`
+    ? `Тариф за найдовшою стороною: <b>${millingTierPriceForRender} грн</b> — але встановлено вручну.`
     : !hasSizeForMilling
-      ? `Вкажіть ширину і висоту, щоб підібрати тариф: до 0.5 м² — 300 грн, 1.0–1.1 м² — 500 грн, від 1.2 м² — 700 грн.`
+      ? `Вкажіть ширину і висоту, щоб підібрати тариф за найдовшою стороною: ${millingTiersText}.`
       : isMultiPartR
-        ? `Автоматично, сума тарифів обох частин за їхніми площами (${fmt(r.materialArea)} м² разом): до 0.5 м² — 300 грн, 1.0–1.1 м² — 500 грн, від 1.2 м² — 700 грн за кожну частину.`
-        : `Автоматично за площею (${fmt(r.materialArea)} м²): до 0.5 м² — 300 грн, 1.0–1.1 м² — 500 грн, від 1.2 м² — 700 грн.`;
+        ? `Автоматично, сума тарифів обох частин за найдовшою стороною кожної (${millingSidesMm.map(fmt0).join(' мм і ')} мм): ${millingTiersText} за кожну частину.${millingOversizeWarn}`
+        : `Автоматично за найдовшою стороною (${fmt0(millingSidesMm[0])} мм): ${millingTiersText}.${millingOversizeWarn}`;
 
   // Контражур
   [...document.getElementById('backlightToggle').children].forEach(b=>{
@@ -3281,11 +3293,11 @@ function buildPriceEditorHTML(){
         ${pePrimField('Фрезерування (свій ЧПУ), грн/м.п.', 'MILLING_PRICE', PE_PRIMITIVE_GETTERS.MILLING_PRICE())}
       </div>
       <div class="pe-subgroup" style="margin-top:14px;">
-        <div class="pe-subgroup-title">Аутсорс-фрезерування — тариф за площею акрилу</div>
+        <div class="pe-subgroup-title">Аутсорс-фрезерування — тариф за найдовшою стороною виробу</div>
         <div class="pe-grid">
           ${OUTSOURCE_MILLING_TIERS.map((t,i)=>{
             const prevMax = i>0 ? OUTSOURCE_MILLING_TIERS[i-1].max : 0;
-            const label = (t.max===Infinity) ? `більше ${prevMax} м², грн` : `до ${t.max} м², грн`;
+            const label = (t.max===Infinity) ? `більше ${prevMax} мм (до ${OUTSOURCE_MILLING_MAX_SIDE_MM}), грн` : `до ${t.max} мм, грн`;
             return peField(label, 'OUTSOURCE_MILLING_TIERS', `${i}.price`, t.price);
           }).join('')}
         </div>
@@ -3454,7 +3466,10 @@ function applyPriceSnapshotData(snap){
   if(snap.DESIRED_MARGIN!=null) DESIRED_MARGIN = snap.DESIRED_MARGIN;
   if(snap.PRICE_FLUCTUATION_MARKUP!=null) PRICE_FLUCTUATION_MARKUP = snap.PRICE_FLUCTUATION_MARKUP;
 
-  if(snap.OUTSOURCE_MILLING_TIERS){
+  // Старі збережені тарифи були за площею (межі 0.5 / 1.1 м²) — їх не підвантажуємо,
+  // бо тепер межі в міліметрах за найдовшою стороною.
+  const tiersAreMm = snap.OUTSOURCE_MILLING_TIERS && snap.OUTSOURCE_MILLING_TIERS.every(t => t.max==null || t.max >= 100);
+  if(snap.OUTSOURCE_MILLING_TIERS && tiersAreMm){
     OUTSOURCE_MILLING_TIERS.length = 0;
     snap.OUTSOURCE_MILLING_TIERS.forEach(t=> OUTSOURCE_MILLING_TIERS.push({max: (t.max==null? Infinity : t.max), price:t.price}));
   }
