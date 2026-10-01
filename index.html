@@ -1477,8 +1477,18 @@ function psuManualBrandSelect(preferredType, brand, voltage, requiredW){
 }
 
 // Автоперехід вольтажу системи/БЖ: довжина неону > 8 м/п → 24В, інакше → 12В
+// Типи LED-стрічки, які зараз реально використовуються (з урахуванням ручного вибору типу)
+function activeLedTypes(){
+  const def = state.mount === 'Зовнішній' ? 'IP67' : 'Звичайна';
+  return state.diffusers
+    .map((d,i)=> (i===0 || state.diffuserActive[i]) ? (state.ledTypeOverride[i] || def) : null)
+    .filter(Boolean);
+}
 function applyAutoSystemVoltage(){
-  const autoV = (state.totalLength || 0) > 8 ? 24 : 12;
+  // Понад 8 м/п переходимо на 24В — але лише якщо для ВСІХ обраних типів стрічки є ціна на 24В.
+  // Інакше (напр. RGB/RGBW, що є тільки на 12В) лишаємось на 12В, щоб стрічка не рахувалась як 0 грн.
+  const allHave24 = activeLedTypes().every(t => ledPrice(t, 24, state.ledBrand) > 0);
+  const autoV = ((state.totalLength || 0) > 8 && allHave24) ? 24 : 12;
   state.systemVoltage = autoV;
   state.psuVoltage = autoV;
 }
@@ -1761,6 +1771,7 @@ function buildLedOverrideSelectors(){
     el.addEventListener('change', e=>{
       const i = +e.target.dataset.i;
       state.ledTypeOverride[i] = e.target.value;
+      applyAutoSystemVoltage();
       render();
     });
   });
@@ -2179,7 +2190,7 @@ function render(){
     .map(l=>`
     <div class="led-line">
       <span class="name">${l.color || '—'}</span>
-      <span class="meta">${l.type} · ${l.brand} · ${fmt(l.len)} м · ${l.priceMeter} грн/м (${r.systemVoltage}В)</span>
+      <span class="meta">${l.type} · ${l.brand} · ${fmt(l.len)} м · ${l.priceMeter ? l.priceMeter + ' грн/м' : '<span style="color:var(--red)">⚠ немає ціни</span>'} (${r.systemVoltage}В)</span>
       <span class="price">${fmt(l.cost)} грн</span>
     </div>
   `).join('') || '<div class="led-line"><span class="name" style="color:var(--muted)">Заповніть розсіювач, щоб побачити розрахунок LED-стрічки</span></div>';
@@ -2353,6 +2364,7 @@ document.getElementById('mountToggle').addEventListener('click', e=>{
   state.mount = e.target.dataset.val;
   // автопідбір типу БЖ за монтажем (тільки якщо не в ручному режимі БЖ)
   state.psuType = state.mount === 'Зовнішній' ? 'IP67' : 'Пластик';
+  applyAutoSystemVoltage();
   render();
 });
 
@@ -2901,7 +2913,7 @@ document.getElementById('compactToggleBtn').addEventListener('click', ()=>{
 });
 
 document.getElementById('systemVoltage').addEventListener('change', e=>{ state.systemVoltage = +e.target.value; render(); });
-document.getElementById('ledBrand').addEventListener('change', e=>{ state.ledBrand = e.target.value; render(); });
+document.getElementById('ledBrand').addEventListener('change', e=>{ state.ledBrand = e.target.value; applyAutoSystemVoltage(); render(); });
 document.getElementById('psuType').addEventListener('change', e=>{ state.psuType = e.target.value; state.psuWattageManual=null; render(); });
 document.getElementById('psuVoltage').addEventListener('change', e=>{ state.psuVoltage = +e.target.value; state.psuWattageManual=null; render(); });
 document.getElementById('psuBrand').addEventListener('change', e=>{ state.psuBrand = e.target.value; state.psuWattageManual=null; render(); });
